@@ -14,23 +14,31 @@ int main (int argc, char** argv)
   pcl::PointCloud<pcl::PointXYZ>::Ptr cloud (new pcl::PointCloud<pcl::PointXYZ>);
   pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_filtered (new pcl::PointCloud<pcl::PointXYZ>);
 
-  ofstream unfiltered_pc;
+  FILE * unfiltered_pc;
+  fileCounter = 0;
   
-  pcl::io::loadPLYFile( "./Debug/turd.ply", *cloud );
-  
-  cout << "Starting the filter\n";
-  // Create the filtering object
-  pcl::StatisticalOutlierRemoval<pcl::PointXYZ> sor;
-  sor.setInputCloud (cloud);
-  sor.setMeanK (50);
-  sor.setStddevMulThresh (1.0);
-  sor.filter (*cloud_filtered);
-  
-  pcl::io::savePLYFile("./Debug/test_pcd.ply", *cloud_filtered);
-  cout << "Saved the file";
+  while(1) {
+    // Iterate while file doesn't exists
+    while ( unfiltered_pc_file != NULL ) {
+      pFile = fopen("unfiltered_ply_" + to_string(fileCounter) +".ply","r");
+    }
+    fclose(unfiltered_pc_file);
+    unfiltered_pc_file = NULL;
+    
+    pcl::io::loadPLYFile("unfiltered_ply_" + to_string(fileCounter) +".ply", *cloud );
+    fileCounter++;
 
+    cout << "Starting the filter\n";
+    // Create the filtering object
+    pcl::StatisticalOutlierRemoval<pcl::PointXYZ> sor;
+    sor.setInputCloud (cloud);
+    sor.setMeanK (50);
+    sor.setStddevMulThresh (1.0);
+    sor.filter (*cloud_filtered);
 
-  string in;
-  cin>>in;
+    pcl::io::savePLYFile("filtered_ply_" + to_string(fileCounter) + ".ply", *cloud_filtered);
+    cout << "Saved the file";
+
+  }
   return (0);
 }

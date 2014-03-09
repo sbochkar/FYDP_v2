@@ -30,7 +30,7 @@ dX_cam = 17;
 dY_cam = 17;
 dX_proj = 30;
 dY_proj = 30;
-addpath('../utilities');
+addpath('./utilities');
 
 
 

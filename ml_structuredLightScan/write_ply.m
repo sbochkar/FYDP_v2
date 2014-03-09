@@ -23,7 +23,7 @@ if size(vertex,2)~=3
 end
 
 
-%if size(face,2)~=3
+i%f size(face,2)~=3
 %    face = face';
 %end
 %if size(face,2)~=3

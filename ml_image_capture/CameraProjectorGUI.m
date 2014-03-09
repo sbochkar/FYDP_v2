@@ -70,7 +70,7 @@ function CameraProjectorGUI_OpeningFcn(hObject, eventdata, handles, varargin)
     % starting the object will make GETSNAPSHOT return faster
     % since the connection to the camera will already have
     % been established. Some cameras take awhile to warm up.
-    handles.video = videoinput('winvideo', 2, 'YUY2_1280x720'); %Use the imaqhwinfo function to determine the adaptors available on your system.
+    handles.video = videoinput('winvideo', 1, 'YUY2_1280x720'); %Use the imaqhwinfo function to determine the adaptors available on your system.
     %handles.video = videoinput('winvideo', 1);
     set(handles.video,'TimerPeriod', 0.05, ...
     'TimerFcn',['if(~isempty(gco)),'...

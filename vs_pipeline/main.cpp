@@ -6,14 +6,21 @@
 #include <pcl/filters/statistical_outlier_removal.h>
 #include <pcl/registration/icp.h>
 #include <pcl/filters/voxel_grid.h>
+#include <pcl/common/common.h>
+#include <pcl/features/normal_3d_omp.h>
+#include <pcl/surface/mls.h>
+#include <pcl/surface/poisson.h>
+#include <pcl/io/vtk_io.h>
+#include <pcl/surface/marching_cubes.h>
 
 using namespace std;
+//using namespace pcl;
 
-//convenient typedefs
 typedef pcl::PointXYZ Point;
 typedef pcl::PointCloud<Point> PointCloud;
 typedef PointCloud::Ptr PointCloudPtr;
-#define DEBUG
+typedef pcl::Normal Normal;
+//#define DEBUG
 
 void printUsage(const char* programName)
 {
@@ -26,7 +33,7 @@ void printUsage(const char* programName)
 		 << "\t-n				   how many files there are.\n";
 }
 
-void FilterBackgroundFromPointCloud( PointCloud& iInputCloud,PointCloud& iOutputCloud, int min_dist_thresh )
+void FilterBackgroundFromPointCloud( PointCloud& iInputCloud,PointCloud& iOutputCloud, int min_dist_thresh, int min_height )
 {
 	//determine size of new cloud (# points within filter threshold)
 	//can probably get rid of this step to be more performant...but deadlines approaching so fuck it
@@ -39,7 +46,7 @@ void FilterBackgroundFromPointCloud( PointCloud& iInputCloud,PointCloud& iOutput
 			tempDistance = sqrt( pow(iInputCloud.points[i].x,2) + 
 								 pow(iInputCloud.points[i].y, 2) + 
 								 pow(iInputCloud.points[i].z, 2) );
-			if ( tempDistance < min_dist_thresh )
+			if ( tempDistance < min_dist_thresh && iInputCloud.points[i].y > min_height )
 				numPointsInRange ++;
 		}
 	}
@@ -59,7 +66,7 @@ void FilterBackgroundFromPointCloud( PointCloud& iInputCloud,PointCloud& iOutput
 			tempDistance = sqrt( pow(iInputCloud.points[i].x,2) + 
 								pow(iInputCloud.points[i].y, 2) + 
 								pow(iInputCloud.points[i].z, 2) );
-			if ( tempDistance < min_dist_thresh )
+			if ( tempDistance < min_dist_thresh  && iInputCloud.points[i].y > min_height )
 			{
 				iOutputCloud.points[counter].x = iInputCloud.points[i].x;
 				iOutputCloud.points[counter].y = iInputCloud.points[i].y;
@@ -149,10 +156,11 @@ int main (int argc, char** argv)
 //Apply basic thresholding filter to remove background
 //=========================================================================================
 	cout << "\n********APPLYING THRESHOLDING FILTER:\n";
-	int min_dist = 800;
+	int min_dist = 980;
+  int min_height = -145;
 	for(int i = 0; i < numFiles; i++)
 	{
-		FilterBackgroundFromPointCloud(*inPointClouds[i], *tempPC, min_dist);
+		FilterBackgroundFromPointCloud(*inPointClouds[i], *tempPC, min_dist, min_height);
 		CopyPointCloud(*inPointClouds[i], *tempPC);
 #ifdef DEBUG
 		stringstream ss;
@@ -191,9 +199,9 @@ int main (int argc, char** argv)
 //=========================================================================================
 	for(int i = 0; i < numFiles; i++)
 	{
-		float tx = -52.4;
-		float ty = 0;
-		float tz = 781.841;
+  float tx = -19.3132;
+  float ty = 0;
+  float tz = 957.772;
 		float rAngle = (360.0f/numFiles)*i*0.0174532925; //radians
 		TranslatePointCloud(*inPointClouds[i],tx,ty,tz);
 		RotatePointCloud(*inPointClouds[i],rAngle);
@@ -214,25 +222,28 @@ int main (int argc, char** argv)
 	//Create ICP Object
 	pcl::IterativeClosestPoint<pcl::PointXYZ, pcl::PointXYZ> icp;
 	icp.setMaxCorrespondenceDistance(10);
-	icp.setTransformationEpsilon (0.000001);
+	icp.setTransformationEpsilon (0.00001);
 	icp.setRANSACIterations(0);
-	icp.setMaximumIterations(100);
+	icp.setMaximumIterations(30);
 	//Create Grid object for downsampling point clouds
 	pcl::VoxelGrid<Point> grid;
-	grid.setLeafSize (2, 2, 2);
+	grid.setLeafSize (2,2,2);
 	//Create temp intermediate downsapmled point clouds
 	PointCloudPtr srcDS (new PointCloud);
 	PointCloudPtr tgtDS (new PointCloud);
 
 	//initialize target to be the first point cloud
-	PointCloudPtr targetCloud(new PointCloud);
-	CopyPointCloud(*targetCloud, *inPointClouds[0]);
+	PointCloudPtr globalTargetCloud(new PointCloud);
+	CopyPointCloud(*globalTargetCloud, *inPointClouds[0]);
+	Eigen::Matrix4f aICP = Eigen::Matrix4f::Identity (); //accumulative icp
 	//Apply ICP on all frames
 	for(int i = 1; i < numFiles; i++)
 	{
 		cout << "Aligning " << baseFileName << i << "..." << endl;
+
 		//Downsample the point clouds
-		grid.setInputCloud (targetCloud);
+		//grid.setInputCloud (inPointClouds[i-1]);
+		grid.setInputCloud (globalTargetCloud);
 		grid.filter (*tgtDS);
 		grid.setInputCloud (inPointClouds[i]);
 		grid.filter (*srcDS);
@@ -246,6 +257,7 @@ int main (int argc, char** argv)
 		icp.setInputTarget(tgtDS);
 		//perform alignment
 		icp.align(*tempPC); //new point cloud of input cloud that's been transformed
+		//CopyPointCloud(*srcDS, *tempPC);
 #ifdef DEBUG
 		stringstream ss_aligned;
 		ss_aligned << "aligned" << i << ".ply";
@@ -256,21 +268,46 @@ int main (int argc, char** argv)
 		//Transform point cloud of non-sampled input cloud and concatenate it to the non-sampled target cloud
 		Eigen::Matrix4f sourceToTarget = Eigen::Matrix4f::Identity ();
 		sourceToTarget = icp.getFinalTransformation();
+		aICP = sourceToTarget * aICP;
 		pcl::transformPointCloud(*inPointClouds[i], *tempPC, sourceToTarget);
-		*targetCloud += *tempPC;
+		*globalTargetCloud += *tempPC;
+#ifdef DEBUG
+		stringstream ss_aicp;
+		ss_aicp << "aICP_firstAlign" << i << ".ply";
+		fileName = ss_aicp.str();
+		pcl::io::savePLYFile(fileName, *tempPC);
+#endif
+		//after applying first icp, do another finer iteration
+		//icp.setMaxCorrespondenceDistance(10);
+		//icp.setTransformationEpsilon (0.00001);
+		//icp.setRANSACIterations(0);
+		//icp.setMaximumIterations(30);
+		//CopyPointCloud(*srcDS, *tempPC);
+
+		//icp.setInputCloud(srcDS);
+		//icp.setInputTarget(tgtDS);
+		//icp.align(*tempPC); 
+
+		//sourceToTarget = icp.getFinalTransformation();
+		//aICP = sourceToTarget * aICP;
+		//pcl::transformPointCloud(*inPointClouds[i], *tempPC, aICP);
+		//*globalTargetCloud += *tempPC;
+
+
+
 #ifdef DEBUG
 		stringstream ss_con;
 		ss_con << "concatenated" << i << ".ply";
 		fileName = ss_con.str();
-		pcl::io::savePLYFile(fileName, *targetCloud);
+		pcl::io::savePLYFile(fileName, *globalTargetCloud);
 #endif
 	}
 
 	//filter outlier of final cloud
-	sor.setInputCloud (targetCloud);
+	sor.setInputCloud (globalTargetCloud);
 	sor.filter (*tempPC);
-	CopyPointCloud(*targetCloud, *tempPC);
-	pcl::io::savePLYFile( "./cloud_final.ply", *targetCloud );
+	CopyPointCloud(*globalTargetCloud, *tempPC);
+	pcl::io::savePLYFile( "./cloud_final.ply", *globalTargetCloud );
 
 //=========================================================================================
 //Mesh reconstruction
@@ -280,7 +317,132 @@ int main (int argc, char** argv)
 //=========================================================================================
 //Cleanup
 //=========================================================================================
-	delete inPointClouds, tempPC, tgtDS, srcDS, targetCloud;
+	//delete inPointClouds, tempPC, tgtDS, srcDS, targetCloud;
 	return 0;
 
 }
+
+//Calibration
+//int main (int argc, char** argv)
+//{
+//  pcl::PointCloud<pcl::PointXYZ>::Ptr cloud (new pcl::PointCloud<pcl::PointXYZ>);
+//  PointCloudPtr tempPC(new PointCloud); //intermediate temp pc for 
+//  pcl::PointCloud<pcl::PointXYZ>::Ptr cloud_filtered (new pcl::PointCloud<pcl::PointXYZ>);
+//
+//  pcl::io::loadPLYFile( "scan0.ply", *cloud );
+//
+//  cout << "Starting the filter\n";
+//  // Create the filtering object
+//  pcl::StatisticalOutlierRemoval<pcl::PointXYZ> sor;
+//  sor.setInputCloud (cloud);
+//  sor.setMeanK (50);
+//  sor.setStddevMulThresh (1.0);
+//  sor.filter (*cloud_filtered);
+//    
+//  FilterBackgroundFromPointCloud(*cloud_filtered, *tempPC, 960, -145);
+//  CopyPointCloud(*cloud_filtered, *tempPC);
+//
+//  float tx = -19.3132;
+//  float ty = 0;
+//  float tz = 957.772;
+//  TranslatePointCloud(*cloud_filtered,tx,ty,tz);
+//
+//  pcl::io::savePLYFile("test_pcd.ply", *cloud_filtered);
+//  cout << "Saved the file";
+//
+//
+//  string in;
+//  cin>>in;
+//  return (0);
+//}
+
+//
+////ICP Test
+//int main (int argc, char** argv)
+//{
+//  PointCloudPtr cloud_in (new PointCloud);
+//  PointCloudPtr cloud_target (new PointCloud);
+//  PointCloudPtr tempPC(new PointCloud); //intermediate temp pc for 
+//
+//  for (int i = 0; i < 2; i+=2)
+//  {
+//	  	stringstream ss;
+//		ss << "target3_" << 1 << ".ply";
+//  pcl::io::loadPLYFile( ss.str(), *cloud_in );
+//		ss.str("");
+//		ss << "target4_" << 0 << ".ply";
+//  pcl::io::loadPLYFile( ss.str(),*cloud_target);
+//
+//	cout << "\n********APPLYING ICP TO ALIGN THE POINT CLOUDS:\n";
+//	//Create ICP Object
+//	pcl::IterativeClosestPoint<pcl::PointXYZ, pcl::PointXYZ> icp;
+//	icp.setMaxCorrespondenceDistance(10);
+//	icp.setTransformationEpsilon (0.000001);
+//	icp.setRANSACIterations(0);
+//	icp.setMaximumIterations(50);
+//	//Apply ICP the two frames
+//	icp.setInputCloud(cloud_in);
+//	icp.setInputTarget(cloud_target);
+//	//perform alignment
+//	icp.align(*tempPC); //new point cloud of input cloud that's been transformed
+//	//Transform point cloud of non-sampled input cloud and concatenate it to the non-sampled target cloud
+//	Eigen::Matrix4f sourceToTarget = Eigen::Matrix4f::Identity ();
+//	sourceToTarget = icp.getFinalTransformation();
+//	pcl::transformPointCloud(*cloud_in, *tempPC, sourceToTarget);
+//	*cloud_target += *tempPC;
+//	ss.str("");
+//	ss << "target4_" << 1 << ".ply";
+//	pcl::io::savePLYFile(ss.str(), *cloud_target);
+//  }
+//	cout << "Saved the file";
+//	string in;
+//	cin>>in;
+//	return (0);
+//}
+
+
+//normal estimation
+//int main (int argc, char** argv)
+//{
+//	PointCloudPtr cloud (new PointCloud);
+//	pcl::io::loadPLYFile( "gnome.ply", *cloud );
+//	pcl::MovingLeastSquares<Point,Point> mls;
+//	mls.setInputCloud(cloud);
+//	mls.setSearchRadius(1);
+//	mls.setPolynomialFit(true);
+//	mls.setPolynomialOrder(2);
+//	mls.setUpsamplingMethod(pcl::MovingLeastSquares<Point,Point>::SAMPLE_LOCAL_PLANE);
+//	mls.setUpsamplingRadius(0.5);
+//	mls.setUpsamplingStepSize(0.3);
+//
+//	PointCloudPtr cloud_smoothed (new PointCloud());
+//	mls.process(*cloud_smoothed);
+//	
+//	pcl::NormalEstimationOMP<Point, Normal> ne;
+//	ne.setNumberOfThreads(8);
+//	ne.setInputCloud(cloud);
+//	ne.setRadiusSearch(15.0);
+//	Eigen::Vector4f centroid;
+//	compute3DCentroid(*cloud_smoothed,centroid);
+//	//ne.setViewPoint(centroid[0], centroid[1], centroid[2]);
+//	ne.setViewPoint(0,0,0);
+//	pcl::PointCloud<Normal>::Ptr cloud_normals (new pcl::PointCloud<Normal>());
+//	ne.compute(*cloud_normals);
+//	for (size_t i = 0; i < cloud_normals->size(); ++i)
+//	{
+//		cloud_normals->points[i].normal_x *=-1;
+//		cloud_normals->points[i].normal_y *=-1;
+//		cloud_normals->points[i].normal_z *=-1;
+//	}
+//
+//	pcl::PointCloud<pcl::PointNormal>::Ptr cloud_smoothed_normals(new pcl::PointCloud<pcl::PointNormal>());
+//	pcl::concatenateFields(*cloud, *cloud_normals, *cloud_smoothed_normals);
+//	pcl::io::savePLYFile("gnome_normal.ply", *cloud_smoothed_normals,true);
+//
+//
+//}
+
+
+
+
+

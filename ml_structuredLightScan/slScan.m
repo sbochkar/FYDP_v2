@@ -76,10 +76,10 @@ end
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %Project Gray Code Patterns
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
-%define serial object for turntable
-tableSerial = serial('COM4', 'BaudRate', 9600, 'DataBits', 8, 'Parity', 'none', 'StopBits', 1, 'FlowControl', 'none');
+%define serial object for turntablen
+tableSerial = serial('COM3', 'BaudRate', 9600, 'DataBits', 8, 'Parity', 'none', 'StopBits', 1, 'FlowControl', 'none');
 %right now, speed of 500R, takes 3200 steps and 10s to go around 360
-numberAngles = 24;
+numberAngles = 72;
 totalSteps = 3200;
 totalTime = 10;
 step = round(totalSteps/numberAngles);
@@ -94,8 +94,7 @@ for scanIndex = 0:numberAngles-1
     %tableSerial.BytesAvailable
     %ID = fgets(tableSerial)
     fclose(tableSerial);
-    %delete tableSerial;
-    %clear tableSerial;
+
     
     % Initialize camera(s) and allocate storage.
     % Note: Make sure to optimize the camera settings.
@@ -115,6 +114,9 @@ for scanIndex = 0:numberAngles-1
     Screen('CopyWindow',allOn,window,rect,rect);
     Screen('Flip',window);
 
+   % pause(5);
+    
+    
     % Initialize projector display and acquire "all on" and "all off" images.
     %Screen('HideCursorHelper',window);
     Screen('CopyWindow',allOn,window,rect,rect);
@@ -126,6 +128,7 @@ for scanIndex = 0:numberAngles-1
     pause(frameDelay);
     T{2} = camCapture(camera);
 
+    
     % Display/capture image(s) using projector and PGR camera(s).
     disp('Scanning object...');
     disp('+ Displaying structured light sequence...');
@@ -256,10 +259,12 @@ for scanIndex = 0:numberAngles-1
     write_ply( -1.*vertices{1}, 'empty_string',filename, 'binary_big_endian');
 end
 stop(camera{1});
+clear tableSerial;
 delete imaqfind;
 delete camera;
 Screen('CloseAll');
-system(strcat('ScanIt_System.exe -f scan -n ', num2str(numberAngles)))
+system(['ScanIt_System.exe -f scan -n ', num2str(numberAngles)])
+
 % %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 % % Part III: Display reconstruction results and save results.
 % 
